@@ -1,11 +1,12 @@
 # AutoEnclave
 
 A macOS menu bar app that keeps your SSH access short-lived without touching
-Secretive or the Secure Enclave for every connection.
+your SSH agent (Secretive or 1Password) for every connection.
 
-**Model.** The enclave key in Secretive is a certificate authority. AutoEnclave
+**Model.** A key held by your agent is a certificate authority: the Secure
+Enclave key in Secretive, or an SSH key in a 1Password vault. AutoEnclave
 generates a throwaway ed25519 key with no passphrase and asks the agent to sign
-it once (one Touch ID). Servers trust the CA line in your own
+it once (one Touch ID or 1Password authorization). Servers trust the CA line in your own
 `~/.ssh/authorized_keys`, so the certificate gets you in until it expires.
 AutoEnclave then deletes the throwaway key on the session events you choose
 (sleep, screen lock, logout, idle…). Minting is always a deliberate click;
@@ -31,12 +32,14 @@ from Finder (`open build`).
 ## First run
 
 1. Click the key icon in the menu bar → **Open AutoEnclave**.
-2. **General** tab: pick the Secretive key that acts as the CA from the
-   dropdown. With a single key in Secretive this happens automatically.
+2. **General** tab: pick the agent (Secretive, 1Password, or any other
+   ssh-agent socket), then the key that acts as the CA from the dropdown. With
+   a single key in the agent this happens automatically. On first launch
+   AutoEnclave picks 1Password if only its agent socket is present.
 3. **Certificate** tab: copy the `cert-authority,principals="…" …` line into
    `~/.ssh/authorized_keys` on each host (or into whatever manages your keys),
    and the `IdentityFile` snippet into `~/.ssh/config` for those hosts.
-4. **Mint**. Secretive prompts once.
+4. **Mint**. The agent prompts once.
 
 The Certificate tab shows the current state and offers one action at a time:
 **Revoke** while a certificate is valid, **Mint** once nothing valid is on disk,
@@ -48,9 +51,23 @@ same Mint or Revoke action, plus opening the window and quitting.
 Mint:
 
 ```sh
-ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/ephemeral_enclave
-SSH_AUTH_SOCK=<secretive socket> ssh-keygen -Us ~/.ssh/secretive-ca.pub -I kkuehler -n kkuehler -V +10h ~/.ssh/ephemeral_enclave.pub
+ssh-keygen -q -t ed25519 -N '' -f <key path>
+SSH_AUTH_SOCK=<agent socket> ssh-keygen -Us <CA public key path> -I <key ID> -n <principals> -V +<validity>h <key path>.pub
 ```
+
+Every placeholder is a field in the General tab. Defaults: `~/.ssh/ephemeral_enclave`,
+`~/.ssh/secretive-ca.pub`, your login name for both key ID and principals, 10 hours.
+The CA public key file is written by AutoEnclave from whichever agent key you
+chose in the dropdown, so the key can have any name in Secretive or 1Password;
+nothing is tied to how the key is labelled there.
+
+Agent sockets:
+
+| Agent | Socket |
+|---|---|
+| Secretive | `~/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh` |
+| 1Password | `~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock` |
+| Other | whatever you enter in General → Agent |
 
 Delete: unlinks `~/.ssh/ephemeral_enclave`, `~/.ssh/ephemeral_enclave.pub`, `~/.ssh/ephemeral_enclave-cert.pub`.
 
@@ -83,12 +100,22 @@ Host vin-008 *.example.com
 ```
 
 `IdentitiesOnly yes` matters: ssh offers agent keys before IdentityFile keys,
-so without it Secretive's key is tried, and prompts, before the certificate.
-IdentityAgent is not needed for these hosts.
+so without it the agent's keys are tried, and prompt, before the certificate.
+IdentityAgent is not needed for these hosts (a global `IdentityAgent` line for
+1Password is fine; `IdentitiesOnly` still wins).
 
 For hosts behind a bastion, add `ProxyJump bastion.example.com`. Each leg then
 authenticates from the Mac with the certificate. `ForwardAgent` would not
-help: it forwards the agent (Secretive), not the ephemeral key.
+help: it forwards the agent, not the ephemeral key.
+
+## 1Password
+
+Turn on **1Password → Settings → Developer → Use the SSH agent**. The agent
+offers SSH keys from your Private vault by default; to use a key from another
+vault, list it in `~/.config/1Password/ssh/agent.toml`. 1Password asks you to
+authorize the signature on each mint, the same way it does for any SSH
+connection. Nothing else differs: the CA public key line, the ssh config
+snippet and the deletion triggers all work the same way.
 
 ## GitHub (optional)
 

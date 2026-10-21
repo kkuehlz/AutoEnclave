@@ -1,6 +1,6 @@
 import Foundation
 
-/// A public key offered by the SSH agent (Secretive).
+/// A public key offered by the SSH agent (Secretive, 1Password, …).
 struct AgentKey: Identifiable, Hashable {
     let line: String          // full "type base64 comment" line, as in authorized_keys
     let fingerprint: String   // SHA256:…

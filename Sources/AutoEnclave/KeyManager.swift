@@ -108,7 +108,7 @@ final class KeyManager: ObservableObject {
 
     // MARK: Minting
 
-    /// Generates a fresh ed25519 key and signs it through the agent. Secretive prompts once for the CA signature.
+    /// Generates a fresh ed25519 key and signs it through the agent, which prompts once for the CA signature.
     func mint() async {
         guard !busy else { return }
         busy = true
@@ -121,30 +121,34 @@ final class KeyManager: ObservableObject {
         let principals = Prefs.string(Prefs.principals)
         let hours = max(1, Prefs.int(Prefs.validityHours))
         let socket = Prefs.expandedAgentSocket
+        let agent = Agent.current
         let paths = allPaths
         let github = Prefs.bool(Prefs.githubRegister)
         let cleanupGitHub = githubInvolved && GitHub.ghPath != nil
 
         guard FileManager.default.fileExists(atPath: socket) else {
-            fail("Agent socket not found at \(socket). Is Secretive running?")
+            fail("Agent socket not found at \(socket). \(agent.notRunningHint)")
             return
         }
         // Make sure the CA public key file holds the key chosen in Settings.
         var caLine = Prefs.string(Prefs.caKeyLine)
         if caLine.isEmpty {
-            // Nothing chosen yet: if Secretive holds exactly one key, that's the CA. Otherwise the user must pick.
+            // Nothing chosen yet: if the agent holds exactly one key, that's the CA. Otherwise the user must pick.
             switch AgentKeys.list(socket: socket) {
             case .failure(let err):
                 fail(err.description); return
             case .success(let keys) where keys.count == 1:
                 caLine = keys[0].line
                 UserDefaults.standard.set(caLine, forKey: Prefs.caKeyLine)
-                note("Using Secretive's only key (\(keys[0].fingerprint)) as the CA")
+                note("Using \(agent.name)'s only key (\(keys[0].fingerprint)) as the CA")
             case .success(let keys) where keys.isEmpty:
-                fail("No key in Secretive. Is Secretive running with a key?"); return
+                fail("No key in \(agent.name). \(agent.notRunningHint)"); return
             case .success:
-                fail("Secretive has several keys. Open Settings → General and choose which one is the CA."); return
+                fail("\(agent.name) has several keys. Open Settings → General and choose which one is the CA."); return
             }
+        } else if case .success(let keys) = AgentKeys.list(socket: socket), !keys.contains(where: { $0.line == caLine }) {
+            // Chosen under a different agent, or removed since. Signing would fail with an opaque agent error.
+            fail("The chosen CA key is not in \(agent.name). Open Settings → General and pick one of its keys."); return
         }
         do {
             try FileManager.default.createDirectory(atPath: (caPath as NSString).deletingLastPathComponent,

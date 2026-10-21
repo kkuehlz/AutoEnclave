@@ -22,6 +22,8 @@ struct CertificateTab: View {
     @AppStorage(Prefs.keyPath) private var keyPath = "~/.ssh/ephemeral_enclave"
     @AppStorage(Prefs.principals) private var principals = NSUserName()
     @AppStorage(Prefs.caKeyLine) private var caLine = ""
+    @AppStorage(Prefs.agentKind) private var agentKind = Agent.secretive.rawValue
+    private var agent: Agent { Agent(rawValue: agentKind) ?? .secretive }
 
     var body: some View {
         Form {
@@ -38,7 +40,7 @@ struct CertificateTab: View {
                         Button(keys.busy ? "Minting…" : "Mint") {
                             Task {
                                 await keys.mint()
-                                bringWindowForward()   // Secretive's prompt took focus; come back on top
+                                bringWindowForward()   // the agent's prompt took focus; come back on top
                             }
                         }
                         .disabled(keys.busy)
@@ -48,21 +50,21 @@ struct CertificateTab: View {
                         }
                     }
                 }
-                Text("Revoking deletes the throwaway key and certificate. Minting generates a new key and asks Secretive to sign it once.")
+                Text("Revoking deletes the throwaway key and certificate. Minting generates a new key and asks \(agent.name) to sign it once.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Text("Add this line to ~/.ssh/authorized_keys on each host")
                     .font(.headline)
                 CopyableText(text: authorizedKeysLine, singleLine: true)
-                Text("Click to copy. It is the Secretive public key marked as a certificate authority, deployed like any other key. It makes sshd accept any certificate that key signs for this account. Do not put the certificate itself on the host; it is only used by ssh on this Mac.")
+                Text("Click to copy. It is the \(agent.name) public key marked as a certificate authority, deployed like any other key. It makes sshd accept any certificate that key signs for this account. Do not put the certificate itself on the host; it is only used by ssh on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Text("Add this to ~/.ssh/config on this Mac, for the hosts that have the line above")
                     .font(.headline)
                 CopyableText(text: sshConfigSnippet)
-                Text("Click to copy, then edit the Host patterns. IdentitiesOnly is what stops ssh from offering Secretive's key first; without it the agent key is tried before the certificate. IdentityAgent is not needed for these hosts. For hosts behind a bastion use ProxyJump rather than ForwardAgent: forwarding carries the agent (Secretive), not this key. AutoEnclave never edits this file.")
+                Text("Click to copy, then edit the Host patterns. IdentitiesOnly is what stops ssh from offering \(agent.name)'s keys first; without it the agent keys are tried before the certificate. IdentityAgent is not needed for these hosts. For hosts behind a bastion use ProxyJump rather than ForwardAgent: forwarding carries the agent (\(agent.name)), not this key. AutoEnclave never edits this file.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -81,7 +83,7 @@ struct CertificateTab: View {
     }
 
     private var authorizedKeysLine: String {
-        let key = caLine.isEmpty ? "<choose the Secretive key in General first>" : caLine
+        let key = caLine.isEmpty ? "<choose the \(agent.name) key in General first>" : caLine
         return "cert-authority,principals=\"\(principals)\" \(key)"
     }
 
@@ -103,8 +105,10 @@ struct GeneralTab: View {
     @AppStorage(Prefs.certIdentity) private var identity = NSUserName()
     @AppStorage(Prefs.principals) private var principals = NSUserName()
     @AppStorage(Prefs.validityHours) private var hours = 10
+    @AppStorage(Prefs.agentKind) private var agentKind = Agent.secretive.rawValue
     @AppStorage(Prefs.agentSocket) private var socket = Prefs.defaultAgentSocket
     @EnvironmentObject private var keys: KeyManager
+    private var agent: Agent { Agent(rawValue: agentKind) ?? .secretive }
 
     var body: some View {
         Form {
@@ -114,17 +118,35 @@ struct GeneralTab: View {
                 Text("The certificate is written next to it as <path>-cert.pub. Point your SSH config at this file with IdentityFile and IdentitiesOnly yes.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Agent") {
+                Picker("SSH agent", selection: $agentKind) {
+                    ForEach(Agent.allCases) { Text($0.name).tag($0.rawValue) }
+                }
+                if let path = agent.defaultSocket {
+                    LabeledContent("Socket") {
+                        HStack(spacing: 6) {
+                            Image(systemName: agent.socketPresent ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(agent.socketPresent ? .green : .orange)
+                            Text(path).font(.caption).foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+                    if !agent.socketPresent {
+                        Text("Socket not found. \(agent.notRunningHint)").font(.caption).foregroundStyle(.orange)
+                    }
+                } else {
+                    TextField("SSH agent socket", text: $socket)
+                }
+                Text(agent.hint)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Certificate authority") {
                 CAKeyPicker()
+                    .id(agentKind)   // rebuild the key list when the agent changes
                 TextField("CA public key path", text: $caPath)
                 TextField("Key ID (-I)", text: $identity)
                 TextField("Principals (-n, comma separated)", text: $principals)
                 Stepper("Validity: \(hours) hours", value: $hours, in: 1...168)
-            }
-            Section("Agent") {
-                TextField("SSH agent socket", text: $socket)
-                Text("Secretive's socket. Signing goes through the agent, so Secretive asks for Touch ID once per mint.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 LaunchAtLoginToggle()
@@ -140,6 +162,7 @@ struct GeneralTab: View {
 struct GitHubTab: View {
     @AppStorage(Prefs.githubRegister) private var enabled = false
     @AppStorage(Prefs.keyPath) private var keyPath = "~/.ssh/ephemeral_enclave"
+    @AppStorage(Prefs.agentKind) private var agentKind = Agent.secretive.rawValue
     @EnvironmentObject private var keys: KeyManager
     @State private var scopeOK: Bool? = nil
     @State private var granting = false
@@ -153,7 +176,7 @@ struct GitHubTab: View {
                     .onChange(of: enabled) { _, on in
                         if on { ensureScope() } else { message = nil; code = nil }
                     }
-                Text("GitHub doesn't accept certificates on personal accounts, so instead AutoEnclave adds the throwaway public key to your account on each mint and removes it on revoke, through the gh CLI. Pushes and pulls over SSH then work without Secretive.")
+                Text("GitHub doesn't accept certificates on personal accounts, so instead AutoEnclave adds the throwaway public key to your account on each mint and removes it on revoke, through the gh CLI. Pushes and pulls over SSH then work without \((Agent(rawValue: agentKind) ?? .secretive).name).")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if enabled {
@@ -433,21 +456,23 @@ struct ActivityTab: View {
 
 // MARK: - CA key picker
 
-/// Dropdown of keys currently in Secretive. The chosen key is remembered and used as the CA for every mint.
+/// Dropdown of keys currently in the agent. The chosen key is remembered and used as the CA for every mint.
 struct CAKeyPicker: View {
     @AppStorage(Prefs.caKeyLine) private var caLine = ""
+    @AppStorage(Prefs.agentKind) private var agentKind = Agent.secretive.rawValue
     @AppStorage(Prefs.agentSocket) private var socket = Prefs.defaultAgentSocket
     @State private var keys: [AgentKey] = []
+    private var agent: Agent { Agent(rawValue: agentKind) ?? .secretive }
     @State private var error: String?
 
     var body: some View {
         Group {
         HStack {
-            Picker("Secretive key", selection: $caLine) {
+            Picker("\(agent.name) key", selection: $caLine) {
                 Text("None").tag("")
                 ForEach(keys) { Text($0.label).tag($0.line) }
                 if !caLine.isEmpty && !keys.contains(where: { $0.line == caLine }) {
-                    Text("Chosen key (not currently in Secretive)").tag(caLine)
+                    Text("Chosen key (not currently in \(agent.name))").tag(caLine)
                 }
             }
             Button("Refresh") { load() }
@@ -455,16 +480,21 @@ struct CAKeyPicker: View {
         if let error {
             Text(error).font(.caption).foregroundStyle(.red)
         } else if keys.isEmpty {
-            Text("No keys found in Secretive. Is it running?").font(.caption).foregroundStyle(.secondary)
+            Text("No keys found in \(agent.name). \(agent.notRunningHint)").font(.caption).foregroundStyle(.secondary)
         } else {
-            Text("Fingerprints match what Secretive shows for each key.").font(.caption).foregroundStyle(.secondary)
+            Text("Fingerprints match what \(agent.name) shows for each key.").font(.caption).foregroundStyle(.secondary)
         }
         }
         .onAppear { load() }
+        .onChange(of: socket) { _, _ in if agent == .custom { load() } }
     }
 
     private func load() {
-        switch AgentKeys.list(socket: (socket as NSString).expandingTildeInPath) {
+        let path = agent.defaultSocket ?? (socket as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: path) else {
+            keys = []; error = "Agent socket not found at \(path). \(agent.notRunningHint)"; return
+        }
+        switch AgentKeys.list(socket: path) {
         case .success(let k):
             keys = k; error = nil
             if caLine.isEmpty, k.count == 1 { caLine = k[0].line }   // only one key: it's the CA

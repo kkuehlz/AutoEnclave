@@ -6,11 +6,12 @@ enum Prefs {
     // Paths and certificate parameters
     static let keyPath          = "keyPath"
     static let caPublicKeyPath  = "caPublicKeyPath"
-    static let caKeyLine        = "caKeyLine"         // the Secretive public key chosen as CA (full authorized_keys line)
+    static let caKeyLine        = "caKeyLine"         // the agent public key chosen as CA (full authorized_keys line)
     static let certIdentity     = "certIdentity"
     static let principals       = "principals"
     static let validityHours    = "validityHours"
-    static let agentSocket      = "agentSocket"
+    static let agentKind        = "agentKind"         // Agent.rawValue: secretive, onePassword, custom
+    static let agentSocket      = "agentSocket"       // only used when agentKind is custom
 
     // Deletion triggers
     static let deleteOnSleep         = "deleteOnSleep"
@@ -27,8 +28,7 @@ enum Prefs {
     static let githubRegister = "githubRegister"
     static let githubEverRegistered = "githubEverRegistered"   // set once a key has been put on GitHub, so cleanup keeps running even if the toggle is later turned off
 
-    static let defaultAgentSocket =
-        NSHomeDirectory() + "/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
+    static let defaultAgentSocket = Agent.secretive.defaultSocket!
 
     private static var registered = false
 
@@ -41,6 +41,7 @@ enum Prefs {
             certIdentity: NSUserName(),
             principals: NSUserName(),
             validityHours: 10,
+            agentKind: defaultAgentKind().rawValue,
             agentSocket: defaultAgentSocket,
             deleteOnSleep: true,
             deleteOnScreenLock: true,
@@ -56,9 +57,24 @@ enum Prefs {
         ])
     }
 
+    /// First-run choice of agent: Secretive, unless only 1Password's agent socket is present on this Mac.
+    private static func defaultAgentKind() -> Agent {
+        if !Agent.secretive.socketPresent && Agent.onePassword.socketPresent { return .onePassword }
+        return .secretive
+    }
+
     /// One-time migration: builds before the rename stored "~/.ssh/day" as the key path.
     static func migrate() {
         let d = UserDefaults.standard
+        // Builds before the agent picker only had a socket path. A non-default path means a custom agent.
+        // (object(forKey:) would also see the registered default, so look at what is actually stored.)
+        let stored = d.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "xyz.category.autoenclave") ?? [:]
+        if stored[agentKind] == nil, let sock = stored[agentSocket] as? String, !sock.isEmpty {
+            let expanded = (sock as NSString).expandingTildeInPath
+            if expanded == Agent.secretive.defaultSocket { d.set(Agent.secretive.rawValue, forKey: agentKind) }
+            else if expanded == Agent.onePassword.defaultSocket { d.set(Agent.onePassword.rawValue, forKey: agentKind) }
+            else { d.set(Agent.custom.rawValue, forKey: agentKind) }
+        }
         if d.string(forKey: keyPath) == "~/.ssh/day" {
             let fm = FileManager.default
             let old = ("~/.ssh/day" as NSString).expandingTildeInPath
@@ -77,5 +93,6 @@ enum Prefs {
     /// Expanded absolute path of the private key.
     static var expandedKeyPath: String { (string(keyPath) as NSString).expandingTildeInPath }
     static var expandedCAPath: String { (string(caPublicKeyPath) as NSString).expandingTildeInPath }
-    static var expandedAgentSocket: String { (string(agentSocket) as NSString).expandingTildeInPath }
+    /// Socket of the chosen agent (its fixed path, or the custom path preference).
+    static var expandedAgentSocket: String { Agent.currentSocket }
 }
