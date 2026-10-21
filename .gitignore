@@ -1,2 +1,12 @@
+# Build output
 .build/
 build/
+*.dmg
+*.app
+
+# Local tooling / editor state
+.claude/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+.DS_Store

@@ -22,7 +22,11 @@ Needs only Command Line Tools (no Xcode).
 make            # builds build/AutoEnclave.app
 make run        # builds and launches it
 make install    # copies to /Applications and launches (use this for launch-at-login)
+make dmg        # build/AutoEnclave.dmg: drag-to-install image with an Applications shortcut
 ```
+
+`build/AutoEnclave.app` itself can also be dragged straight into Applications
+from Finder (`open build`).
 
 ## First run
 
