@@ -12,7 +12,13 @@ enum GitHub {
         ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"].first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    static var title: String { titlePrefix + Host.current().localizedName.map { $0.replacingOccurrences(of: " ", with: "-") }!.lowercased() }
+    /// e.g. "autoenclave:kevins-macbook-pro": the Mac's name reduced to plain ASCII so it reads cleanly on GitHub.
+    static var title: String {
+        let name = (Host.current().localizedName ?? "mac").lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        return titlePrefix + (name.isEmpty ? "mac" : name)
+    }
 
     /// Registers `publicKeyPath` on the GitHub account after removing any previous AutoEnclave keys. Blocking.
     static func register(publicKeyPath: String) -> Result<Void, AgentError> {
@@ -24,6 +30,7 @@ enum GitHub {
         let r = Shell.run(gh, ["api", "user/keys", "-f", "title=\(title)", "-f", "key=\(key)"])
         guard r.ok else { return .failure(AgentError(friendly(r.message))) }
         logger.notice("registered ephemeral key on GitHub as \(title, privacy: .public)")
+        UserDefaults.standard.set(true, forKey: Prefs.githubEverRegistered)
         return .success(())
     }
 
@@ -55,8 +62,11 @@ enum GitHub {
         return Shell.run(gh, ["auth", "status", "-h", "github.com"]).ok
     }
 
-    /// Runs `gh auth refresh` to add the key-management scope. gh prints a one-time code and opens the browser;
-    /// `onCode` receives the code as soon as it appears so the UI can show it. Blocks until gh exits.
+    static let deviceURL = URL(string: "https://github.com/login/device")!
+
+    /// Runs `gh auth refresh` to add the key-management scope. Without a terminal, gh prints a one-time code
+    /// and the device URL but does not open a browser, so `onCode` fires as soon as the code appears and the
+    /// caller opens the page. Blocks until gh exits, i.e. until the user approves in the browser.
     static func grantScope(onCode: @escaping (String) -> Void) -> Result<Void, AgentError> {
         guard let gh = ghPath else { return .failure(AgentError("gh CLI not found. Install it with: brew install gh")) }
         let p = Process()
@@ -71,12 +81,14 @@ enum GitHub {
         p.standardError = pipe
         p.standardInput = FileHandle.nullDevice
         var collected = ""
+        var codeSeen = false
         let lock = NSLock()
         pipe.fileHandleForReading.readabilityHandler = { h in
             let chunk = String(decoding: h.availableData, as: UTF8.self)
             guard !chunk.isEmpty else { return }
             lock.lock(); collected += chunk; let all = collected; lock.unlock()
-            if let r = all.range(of: #"[A-Z0-9]{4}-[A-Z0-9]{4}"#, options: .regularExpression) {
+            if !codeSeen, let r = all.range(of: #"[A-Z0-9]{4}-[A-Z0-9]{4}"#, options: .regularExpression) {
+                codeSeen = true
                 onCode(String(all[r]))
             }
         }
@@ -89,20 +101,9 @@ enum GitHub {
         return .failure(AgentError("gh auth refresh failed: " + output.trimmingCharacters(in: .whitespacesAndNewlines)))
     }
 
-    /// Fallback: run the grant in Terminal.app where gh can prompt normally.
-    static func grantScopeInTerminal() {
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "gh auth refresh -h github.com -s admin:public_key"
-        end tell
-        """
-        _ = Shell.run("/usr/bin/osascript", ["-e", script])
-    }
-
     private static func friendly(_ message: String) -> String {
         if message.contains("admin:public_key") || message.contains("404") {
-            return "GitHub: the gh token lacks the admin:public_key scope. Run once in a terminal:\n  gh auth refresh -h github.com -s admin:public_key"
+            return "GitHub: the gh token lacks the admin:public_key scope. Grant it in the GitHub tab."
         }
         if message.contains("not logged") || message.contains("auth login") {
             return "GitHub: gh is not logged in. Run: gh auth login"

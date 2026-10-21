@@ -7,6 +7,7 @@ struct MainView: View {
             CertificateTab().tabItem { Label("Certificate", systemImage: "key") }
             GeneralTab().tabItem { Label("General", systemImage: "gear") }
             TriggersTab().tabItem { Label("Triggers", systemImage: "bolt") }
+            GitHubTab().tabItem { Label("GitHub", systemImage: "arrow.triangle.branch") }
             ActivityTab().tabItem { Label("Activity", systemImage: "list.bullet.rectangle") }
         }
         .frame(width: 600)
@@ -61,7 +62,7 @@ struct CertificateTab: View {
                 Text("Add this to ~/.ssh/config on this Mac, for the hosts that have the line above")
                     .font(.headline)
                 CopyableText(text: sshConfigSnippet)
-                Text("Click to copy, then edit the Host patterns. IdentitiesOnly is what stops ssh from offering Secretive's key first; without it the agent key is tried before the certificate. IdentityAgent is not needed for these hosts. AutoEnclave never edits this file.")
+                Text("Click to copy, then edit the Host patterns. IdentitiesOnly is what stops ssh from offering Secretive's key first; without it the agent key is tried before the certificate. IdentityAgent is not needed for these hosts. For hosts behind a bastion use ProxyJump rather than ForwardAgent: forwarding carries the agent (Secretive), not this key. AutoEnclave never edits this file.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -74,6 +75,8 @@ struct CertificateTab: View {
         Host vin-008 *.example.com
             IdentityFile \(keyPath)
             IdentitiesOnly yes
+            # Multiple hops: each leg authenticates from this Mac with the certificate.
+            # ProxyJump bastion.example.com
         """
     }
 
@@ -123,9 +126,6 @@ struct GeneralTab: View {
                 Text("Secretive's socket. Signing goes through the agent, so Secretive asks for Touch ID once per mint.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("GitHub") {
-                GitHubToggle()
-            }
             Section {
                 LaunchAtLoginToggle()
             }
@@ -135,53 +135,67 @@ struct GeneralTab: View {
     }
 }
 
-struct GitHubToggle: View {
+// MARK: - GitHub
+
+struct GitHubTab: View {
     @AppStorage(Prefs.githubRegister) private var enabled = false
+    @AppStorage(Prefs.keyPath) private var keyPath = "~/.ssh/ephemeral_enclave"
     @EnvironmentObject private var keys: KeyManager
     @State private var scopeOK: Bool? = nil
     @State private var granting = false
     @State private var code: String?
     @State private var message: String?
-    @AppStorage(Prefs.keyPath) private var keyPath = "~/.ssh/ephemeral_enclave"
 
     var body: some View {
-        Group {
-        Toggle("Use the ephemeral key for GitHub", isOn: $enabled)
-            .onChange(of: enabled) { _, on in
-                if on { ensureScope() } else { message = nil; code = nil }
+        Form {
+            Section {
+                Toggle("Use the ephemeral key for GitHub", isOn: $enabled)
+                    .onChange(of: enabled) { _, on in
+                        if on { ensureScope() } else { message = nil; code = nil }
+                    }
+                Text("GitHub doesn't accept certificates on personal accounts, so instead AutoEnclave adds the throwaway public key to your account on each mint and removes it on revoke, through the gh CLI. Pushes and pulls over SSH then work without Secretive.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-        Text("GitHub doesn't accept certificates on personal accounts, so AutoEnclave adds the throwaway public key to your account on each mint and removes it on revoke, via gh. Add this to ~/.ssh/config yourself so github.com uses the key:")
-            .font(.caption).foregroundStyle(.secondary)
-        if enabled {
-            CopyableText(text: "Host github.com\n    IdentityFile \(keyPath)\n    IdentitiesOnly yes")
-            HStack {
-                switch scopeOK {
-                case .some(true):
-                    Label("gh can manage your keys", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                case .some(false):
-                    Label("gh needs the admin:public_key scope", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                case .none:
-                    Label("Checking gh…", systemImage: "clock")
+            if enabled {
+                Section("1. Let gh manage your keys") {
+                    HStack {
+                        switch scopeOK {
+                        case .some(true):
+                            Label("gh can manage your keys", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        case .some(false):
+                            Label("gh needs the admin:public_key scope", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        case .none:
+                            Label("Checking gh…", systemImage: "clock")
+                        }
+                        Spacer()
+                        if scopeOK == false {
+                            Button(granting ? "Waiting for approval in browser…" : "Grant in browser") { grant() }
+                                .disabled(granting)
+                        }
+                    }
+                    if let code {
+                        HStack {
+                            Text("One-time code").font(.caption)
+                            CopyableText(text: code, singleLine: true).frame(maxWidth: 140)
+                            Text("Already on your clipboard. Paste it into the GitHub page that opened and approve.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    if let message { Text(message).font(.caption).foregroundStyle(.red) }
+                    if GitHub.ghPath == nil {
+                        Text("gh not found. Install with: brew install gh").font(.caption).foregroundStyle(.red)
+                    }
                 }
-                Spacer()
-                if scopeOK == false {
-                    Button(granting ? "Waiting for browser…" : "Grant in browser") { grant() }.disabled(granting)
-                    Button("Grant in Terminal") { GitHub.grantScopeInTerminal() }
+                Section {
+                    Text("2. Add this to ~/.ssh/config")
+                        .font(.headline)
+                    CopyableText(text: "Host github.com\n    IdentityFile \(keyPath)\n    IdentitiesOnly yes")
+                    Text("Click to copy. Then `ssh -T git@github.com` should greet you with no Touch ID.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-            }
-            if let code {
-                HStack {
-                    Text("One-time code:").font(.caption)
-                    CopyableText(text: code, singleLine: true).frame(maxWidth: 160)
-                    Text("Click to copy, then paste it into the GitHub page that just opened.").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if let message { Text(message).font(.caption).foregroundStyle(.red) }
-            if GitHub.ghPath == nil {
-                Text("gh not found. Install with: brew install gh").font(.caption).foregroundStyle(.red)
             }
         }
-        }
+        .formStyle(.grouped)
         .onAppear { if enabled { ensureScope() } }
     }
 
@@ -196,13 +210,21 @@ struct GitHubToggle: View {
     private func grant() {
         granting = true; code = nil; message = nil
         Task.detached {
-            let result = GitHub.grantScope { c in Task { @MainActor in code = c } }
+            let result = GitHub.grantScope { c in
+                Task { @MainActor in
+                    code = c
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(c, forType: .string)
+                    NSWorkspace.shared.open(GitHub.deviceURL)
+                }
+            }
             await MainActor.run {
                 granting = false
                 switch result {
                 case .success:
                     code = nil; scopeOK = true; message = nil
                     keys.note("GitHub: admin:public_key scope granted")
+                    NSApp.activate(ignoringOtherApps: true)
                     if case .valid = keys.state {
                         // Key already on disk: register it now rather than waiting for the next mint.
                         let pub = keys.publicKeyPath
@@ -214,7 +236,7 @@ struct GitHubToggle: View {
                         }
                     }
                 case .failure(let e):
-                    message = e.description + "\nTry \"Grant in Terminal\"."
+                    message = e.description
                 }
             }
         }

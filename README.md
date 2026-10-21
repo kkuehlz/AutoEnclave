@@ -82,15 +82,19 @@ Host vin-008 *.example.com
 so without it Secretive's key is tried, and prompts, before the certificate.
 IdentityAgent is not needed for these hosts.
 
+For hosts behind a bastion, add `ProxyJump bastion.example.com`. Each leg then
+authenticates from the Mac with the certificate. `ForwardAgent` would not
+help: it forwards the agent (Secretive), not the ephemeral key.
+
 ## GitHub (optional)
 
 GitHub does not accept user certificates on personal accounts, so the CA trick
-can't apply there. With **General → Use the ephemeral key for GitHub** on,
+can't apply there. With **GitHub → Use the ephemeral key for GitHub** on,
 AutoEnclave:
 
 - shows the `Host github.com` snippet to add to ssh config yourself,
 - checks that `gh` can manage keys, and if not runs
-  `gh auth refresh -h github.com -s admin:public_key` for you, showing the
-  one-time code to paste into the browser page it opens,
+  `gh auth refresh -h github.com -s admin:public_key` for you: the one-time
+  code is copied to the clipboard and the GitHub device page is opened,
 - adds the throwaway public key to your account on every mint and removes it
   on revoke. Stale keys from an earlier day are swept on the next mint or launch.

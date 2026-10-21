@@ -31,6 +31,10 @@ final class KeyManager: ObservableObject {
     private var expiryTimer: Timer?
 
     private init() {
+        // SwiftUI creates this before the app delegate runs, so defaults must be in place here or the
+        // key path reads as empty and the state looks like "no key".
+        Prefs.registerDefaults()
+        Prefs.migrate()
         refresh()
     }
 
@@ -119,6 +123,7 @@ final class KeyManager: ObservableObject {
         let socket = Prefs.expandedAgentSocket
         let paths = allPaths
         let github = Prefs.bool(Prefs.githubRegister)
+        let cleanupGitHub = githubInvolved && GitHub.ghPath != nil
 
         guard FileManager.default.fileExists(atPath: socket) else {
             fail("Agent socket not found at \(socket). Is Secretive running?")
@@ -164,6 +169,11 @@ final class KeyManager: ObservableObject {
                 return "Could not create \(dir): \(error.localizedDescription)"
             }
             for p in paths where fm.fileExists(atPath: p) { try? fm.removeItem(atPath: p) }
+            if cleanupGitHub, !github {
+                // Feature is off now but a key may still be up there from before: take it down and leave it down.
+                _ = GitHub.unregisterAll()
+            }
+            // (When GitHub is on, register() below removes old keys itself before adding the new one.)
 
             let comment = "autoenclave \(identity) \(ISO8601DateFormatter().string(from: Date()))"
             let gen = Shell.run("/usr/bin/ssh-keygen",
@@ -216,28 +226,35 @@ final class KeyManager: ObservableObject {
                 lastError = "Failed to remove \(p): \(error.localizedDescription)"
             }
         }
-        if removed > 0 {
-            note("Deleted key (\(reason))")
-            if Prefs.bool(Prefs.githubRegister) {
-                // Network call, best effort: sleep may cut it short, in which case the next mint sweeps stale keys.
-                Task.detached(priority: .utility) {
-                    let result = GitHub.unregisterAll()
-                    await MainActor.run {
-                        switch result {
-                        case .success(let n) where n > 0: self.note("Removed ephemeral key from GitHub")
-                        case .success: break
-                        case .failure(let e): self.note("GitHub removal failed: \(e.description)")
-                        }
-                    }
+        if removed > 0 { note("Deleted key (\(reason))") }
+        refresh()
+        // Always clear GitHub as well, whether or not local files were present. Network call, best effort:
+        // sleep may cut it short, in which case the next mint or launch sweeps what is left.
+        removeFromGitHub()
+    }
+
+    /// Whether GitHub cleanup applies: the feature is on, or a key was registered at some point.
+    var githubInvolved: Bool { Prefs.bool(Prefs.githubRegister) || Prefs.bool(Prefs.githubEverRegistered) }
+
+    /// Removes every AutoEnclave key from the GitHub account, in the background.
+    func removeFromGitHub() {
+        guard githubInvolved, GitHub.ghPath != nil else { return }
+        Task.detached(priority: .utility) {
+            let result = GitHub.unregisterAll()
+            await MainActor.run {
+                switch result {
+                case .success(let n) where n > 0: self.note("Removed ephemeral key from GitHub")
+                case .success: break
+                case .failure(let e): self.note("GitHub removal failed: \(e.description)")
                 }
             }
         }
-        refresh()
     }
 
     /// Removes leftover GitHub keys when nothing valid is on disk (e.g. deleted during sleep with no network).
     func sweepGitHubIfStale() {
         guard Prefs.bool(Prefs.githubRegister) else { return }
+        refresh()
         if case .valid = state { return }
         Task.detached(priority: .utility) {
             if case .success(let n) = GitHub.unregisterAll(), n > 0 {

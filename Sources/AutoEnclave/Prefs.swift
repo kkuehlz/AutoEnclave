@@ -25,11 +25,16 @@ enum Prefs {
 
     // GitHub: register the throwaway public key on mint, remove it on revoke (via gh)
     static let githubRegister = "githubRegister"
+    static let githubEverRegistered = "githubEverRegistered"   // set once a key has been put on GitHub, so cleanup keeps running even if the toggle is later turned off
 
     static let defaultAgentSocket =
         NSHomeDirectory() + "/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
 
+    private static var registered = false
+
     static func registerDefaults() {
+        guard !registered else { return }
+        registered = true
         UserDefaults.standard.register(defaults: [
             keyPath: "~/.ssh/ephemeral_enclave",
             caPublicKeyPath: "~/.ssh/secretive-ca.pub",
@@ -47,6 +52,7 @@ enum Prefs {
             deleteOnIdle: false,
             idleMinutes: 30,
             githubRegister: false,
+            githubEverRegistered: false,
         ])
     }
 
