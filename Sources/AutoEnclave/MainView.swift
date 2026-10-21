@@ -451,6 +451,14 @@ struct ManagedHostsField: View {
     @AppStorage(Prefs.managedHosts) private var hosts = ""
     @AppStorage(Prefs.githubRegister) private var github = false
     @State private var current: String? = SSHConfig.currentBlock()
+    @AppStorage(Prefs.keyPath) private var keyPath = "~/.ssh/ephemeral_enclave"
+
+    /// The block as it would be written, using a placeholder host until some are configured.
+    private var preview: String {
+        let hosts = SSHConfig.desiredHosts
+        return SSHConfigBlock.render(hosts: hosts.isEmpty ? ["vin-008 *.example.com"] : hosts, keyPath: keyPath)
+            .trimmingCharacters(in: .newlines)
+    }
 
     var body: some View {
         TextField("Host patterns using the ephemeral key", text: $hosts, prompt: Text("*.devcore4.com, bastion-*"))
@@ -459,9 +467,12 @@ struct ManagedHostsField: View {
             .font(.caption).foregroundStyle(.secondary)
         SSHConfigApplyView(current: $current)
         if let current {
-            Text(current).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("Currently in ~/.ssh/config:").font(.caption).foregroundStyle(.secondary)
+            CopyableText(text: current)
         } else {
-            Text("No managed block in ~/.ssh/config yet.").font(.caption).foregroundStyle(.secondary)
+            Text("Not in ~/.ssh/config yet. This is what Apply writes at the top of the file; click to copy it if you would rather add it by hand. IdentitiesOnly is what stops ssh from offering Secretive's key first. IdentityAgent is not needed for these hosts.")
+                .font(.caption).foregroundStyle(.secondary)
+            CopyableText(text: preview)
         }
         HStack {
             Button("Remove block") { hosts = ""; _ = SSHConfig.sync(); current = SSHConfig.currentBlock() }
