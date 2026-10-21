@@ -23,12 +23,6 @@ enum Prefs {
     static let deleteOnIdle          = "deleteOnIdle"
     static let idleMinutes           = "idleMinutes"
 
-    // Mint triggers (only mint when no valid certificate is present)
-    static let mintOnLaunch   = "mintOnLaunch"      // app starts, i.e. at login when launch-at-login is on
-    static let mintOnWake     = "mintOnWake"
-    static let mintOnUnlock   = "mintOnUnlock"
-    static let mintOnSession  = "mintOnSession"     // fast-user-switch back to this user
-
     // GitHub: register the throwaway public key on mint, remove it on revoke (via gh)
     static let githubRegister = "githubRegister"
 
@@ -56,10 +50,6 @@ enum Prefs {
             deleteOnExpiry: true,
             deleteOnIdle: false,
             idleMinutes: 30,
-            mintOnLaunch: true,
-            mintOnWake: true,
-            mintOnUnlock: true,
-            mintOnSession: true,
             githubRegister: false,
             managedHosts: "",
             sshConfigOverrideAccepted: false,

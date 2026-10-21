@@ -30,7 +30,7 @@ struct CertificateTab: View {
                 if case .valid(let until) = keys.state {
                     LabeledContent("Expires", value: Self.full.string(from: until))
                 }
-                LabeledContent("Key file", value: keyPath)
+                LabeledContent("Key file") { CopyableText(text: keyPath, singleLine: true) }
                 HStack {
                     if case .valid = keys.state {
                         Button("Revoke", role: .destructive) { keys.deleteKey(reason: "revoked manually") }
@@ -231,7 +231,7 @@ struct LaunchAtLoginToggle: View {
         if let error {
             Text(error).font(.caption).foregroundStyle(.red)
         }
-        Text("Needed for \"mint on launch\" to act as \"mint on login\". Works best with the app in /Applications (make install).")
+        Text("Keeps the deletion triggers armed from login onward. Works best with the app in /Applications (make install).")
             .font(.caption).foregroundStyle(.secondary)
     }
 }
@@ -249,10 +249,6 @@ struct TriggersTab: View {
     @AppStorage(Prefs.deleteOnIdle) private var onIdle = false
     @AppStorage(Prefs.idleMinutes) private var idleMinutes = 30
 
-    @AppStorage(Prefs.mintOnLaunch) private var mintLaunch = true
-    @AppStorage(Prefs.mintOnWake) private var mintWake = true
-    @AppStorage(Prefs.mintOnUnlock) private var mintUnlock = true
-    @AppStorage(Prefs.mintOnSession) private var mintSession = true
 
     var body: some View {
         Form {
@@ -270,12 +266,8 @@ struct TriggersTab: View {
                         .disabled(!onIdle)
                 }
             }
-            Section("Mint a new certificate when…") {
-                Toggle("AutoEnclave launches (at login, with launch at login enabled)", isOn: $mintLaunch)
-                Toggle("The Mac wakes from sleep", isOn: $mintWake)
-                Toggle("The screen unlocks", isOn: $mintUnlock)
-                Toggle("Your session becomes active again", isOn: $mintSession)
-                Text("Mint triggers only fire when there is no valid certificate on disk, so you get one Touch ID prompt, not one per event.")
+            Section {
+                Text("Minting is always manual: the Mint button in the Certificate tab, one Touch ID prompt. Revocation happens automatically on the events above, or with the Revoke button.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

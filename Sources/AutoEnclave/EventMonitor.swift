@@ -2,8 +2,8 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// Subscribes to macOS session events and translates them into key deletions or mints,
-/// according to the user's trigger settings.
+/// Subscribes to macOS session events and deletes the throwaway key on the ones the user enabled.
+/// Minting is never automatic; it is the Mint button in the app.
 @MainActor
 final class EventMonitor {
     static let shared = EventMonitor()
@@ -33,17 +33,6 @@ final class EventMonitor {
             $0.deleteKey(reason: "screensaver started")
         }
 
-        // --- Mint triggers (only when nothing valid is on disk) ---
-        observe(workspace, NSWorkspace.didWakeNotification, pref: Prefs.mintOnWake) {
-            $0.mintIfNeeded(reason: "wake")
-        }
-        observe(workspace, NSWorkspace.sessionDidBecomeActiveNotification, pref: Prefs.mintOnSession) {
-            $0.mintIfNeeded(reason: "session active")
-        }
-        observe(distributed, Notification.Name("com.apple.screenIsUnlocked"), pref: Prefs.mintOnUnlock) {
-            $0.mintIfNeeded(reason: "screen unlocked")
-        }
-
         // Idle polling. Cheap, so it just runs every 30 s and checks the pref each time.
         let t = Timer(timeInterval: 30, repeats: true) { _ in
             Task { @MainActor in self.checkIdle() }
@@ -54,12 +43,6 @@ final class EventMonitor {
         KeyManager.shared.sweepGitHubIfStale()
         SSHConfig.sync(force: Prefs.bool(Prefs.sshConfigOverrideAccepted))
 
-        if Prefs.bool(Prefs.mintOnLaunch) {
-            // Give the menu bar a moment to appear before the Touch ID prompt.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                KeyManager.shared.mintIfNeeded(reason: "launch")
-            }
-        }
     }
 
     private func observe(_ center: NotificationCenter, _ name: Notification.Name, pref: String,
@@ -82,13 +65,5 @@ final class EventMonitor {
         } else {
             idleFired = false
         }
-    }
-}
-
-extension KeyManager {
-    /// Mints only when there is no currently valid certificate, so wake/unlock don't cause repeated Touch ID prompts.
-    func mintIfNeeded(reason: String) {
-        if case .valid = state { return }
-        Task { await mint() }
     }
 }

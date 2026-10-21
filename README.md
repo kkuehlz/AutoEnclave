@@ -8,8 +8,8 @@ generates a throwaway ed25519 key with no passphrase and asks the agent to sign
 it once (one Touch ID). Servers trust the CA line in your own
 `~/.ssh/authorized_keys`, so the certificate gets you in until it expires.
 AutoEnclave then deletes the throwaway key on the session events you choose
-(sleep, screen lock, logout, idle…) and mints a fresh one on the events you
-choose (login, wake, unlock…).
+(sleep, screen lock, logout, idle…). Minting is always a deliberate click;
+revocation is automatic or a click.
 
 Nothing on the host is customised beyond one authorized_keys entry, deployed
 like any other public key.
@@ -32,8 +32,7 @@ make install    # copies to /Applications and launches (use this for launch-at-l
 3. **Certificate** tab: copy the `cert-authority,principals="…" …` line into
    `~/.ssh/authorized_keys` on each host (or into whatever manages your keys),
    and the `IdentityFile` snippet into `~/.ssh/config` for those hosts.
-4. **Mint**. Secretive prompts once. (With "mint on launch" enabled this
-   already happened when the app started.)
+4. **Mint**. Secretive prompts once.
 
 The Certificate tab shows the current state and offers one action at a time:
 **Revoke** while a certificate is valid, **Mint** once nothing valid is on disk,
@@ -56,17 +55,15 @@ Session events used:
 | Trigger | Source |
 |---|---|
 | Sleep / lid close | `NSWorkspace.willSleepNotification` |
-| Wake | `NSWorkspace.didWakeNotification` |
-| Screen lock / unlock | `com.apple.screenIsLocked` / `com.apple.screenIsUnlocked` |
+| Screen lock | `com.apple.screenIsLocked` |
 | Screensaver | `com.apple.screensaver.didstart` |
 | Logout, restart, shutdown | `NSWorkspace.willPowerOffNotification`, plus the Quit Apple event's reason as a backstop |
-| Fast user switch | `NSWorkspace.sessionDidResignActive/BecomeActive` |
+| Fast user switch | `NSWorkspace.sessionDidResignActiveNotification` |
 | Idle | polled via `CGEventSource.secondsSinceLastEventType` |
 | Certificate expiry | timer at the cert's `Valid: to` time |
-| Login | app launch, with Launch at Login enabled in Settings → General |
 
-Mint triggers only fire when no valid certificate is on disk, so wake and
-unlock don't cause repeated Touch ID prompts.
+Minting is only ever the Mint button, so Touch ID is asked for exactly when
+you click it.
 
 All settings live in `defaults read xyz.category.autoenclave`.
 
