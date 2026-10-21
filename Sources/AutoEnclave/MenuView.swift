@@ -7,6 +7,19 @@ struct MenuView: View {
     var body: some View {
         Text(keys.statusLine)
         Divider()
+        // Same one-action-at-a-time rule as the Certificate tab.
+        if case .valid = keys.state {
+            Button("Revoke Ephemeral Certificate") { keys.deleteKey(reason: "revoked manually") }
+                .keyboardShortcut("r")
+        } else {
+            Button(keys.busy ? "Minting…" : "Mint Ephemeral Certificate") { Task { await keys.mint() } }
+                .disabled(keys.busy)
+                .keyboardShortcut("m")
+            if keys.state.isPresent {
+                Button("Remove Stale Key") { keys.deleteKey(reason: "stale key removed manually") }
+            }
+        }
+        Divider()
         Button("Open AutoEnclave") {
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)

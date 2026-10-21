@@ -36,8 +36,8 @@ make install    # copies to /Applications and launches (use this for launch-at-l
 
 The Certificate tab shows the current state and offers one action at a time:
 **Revoke** while a certificate is valid, **Mint** once nothing valid is on disk,
-so there is never a second, overlapping key. The menu bar item only shows
-status, opens the window, or quits.
+so there is never a second, overlapping key. The menu bar dropdown offers the
+same Mint or Revoke action, plus opening the window and quitting.
 
 ## What it does under the hood
 
