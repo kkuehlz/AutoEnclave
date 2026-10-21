@@ -41,7 +41,6 @@ final class EventMonitor {
         idleTimer = t
 
         KeyManager.shared.sweepGitHubIfStale()
-        SSHConfig.sync(force: Prefs.bool(Prefs.sshConfigOverrideAccepted))
 
     }
 

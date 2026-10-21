@@ -69,20 +69,18 @@ All settings live in `defaults read xyz.category.autoenclave`.
 
 ## ssh config
 
-AutoEnclave keeps one marked block at the top of `~/.ssh/config`:
+AutoEnclave never edits `~/.ssh/config`. The Certificate tab shows a snippet
+to copy for the hosts that trust the CA:
 
 ```
-# >>> AutoEnclave managed block: edit in the AutoEnclave app, not here >>>
-Host github.com *.devcore4.com
+Host vin-008 *.example.com
     IdentityFile ~/.ssh/ephemeral_enclave
     IdentitiesOnly yes
-# <<< AutoEnclave managed block <<<
 ```
 
-Set the host patterns in the Certificate tab. ssh takes the first value it
-sees for each option, so this block decides the key while every other option
-still comes from your own entries below it. The first time the file is touched
-a copy is kept at `~/.ssh/config.autoenclave-backup`.
+`IdentitiesOnly yes` matters: ssh offers agent keys before IdentityFile keys,
+so without it Secretive's key is tried, and prompts, before the certificate.
+IdentityAgent is not needed for these hosts.
 
 ## GitHub (optional)
 
@@ -90,21 +88,9 @@ GitHub does not accept user certificates on personal accounts, so the CA trick
 can't apply there. With **General → Use the ephemeral key for GitHub** on,
 AutoEnclave:
 
-- adds `github.com` to the managed ssh config block,
+- shows the `Host github.com` snippet to add to ssh config yourself,
 - checks that `gh` can manage keys, and if not runs
   `gh auth refresh -h github.com -s admin:public_key` for you, showing the
   one-time code to paste into the browser page it opens,
 - adds the throwaway public key to your account on every mint and removes it
   on revoke. Stale keys from an earlier day are swept on the next mint or launch.
-
-AutoEnclave checks your existing config before writing: any Host, Match or
-global entry whose patterns cover a managed host and that sets IdentityFile,
-IdentitiesOnly, IdentityAgent or CertificateFile is listed with its file and
-line, and the block is only written after an explicit "Apply anyway".
-Include directives are followed.
-
-## Tests
-
-```sh
-make test   # parser and conflict-detection checks (plain executable, no XCTest needed)
-```

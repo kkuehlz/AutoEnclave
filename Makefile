@@ -2,7 +2,7 @@ APP     = AutoEnclave
 BUNDLE  = build/$(APP).app
 BIN     = .build/release/$(APP)
 
-.PHONY: all build bundle run install clean test
+.PHONY: all build bundle run install clean
 
 all: bundle
 
@@ -25,9 +25,6 @@ install: bundle
 	rm -rf /Applications/$(APP).app
 	cp -R $(BUNDLE) /Applications/
 	open /Applications/$(APP).app
-
-test:
-	swift run -c release sshconfig-checks
 
 clean:
 	rm -rf .build build

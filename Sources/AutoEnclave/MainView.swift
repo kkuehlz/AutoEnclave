@@ -1,6 +1,5 @@
 import SwiftUI
 import ServiceManagement
-import SSHConfigKit
 
 struct MainView: View {
     var body: some View {
@@ -30,7 +29,7 @@ struct CertificateTab: View {
                 if case .valid(let until) = keys.state {
                     LabeledContent("Expires", value: Self.full.string(from: until))
                 }
-                LabeledContent("Key file") { CopyableText(text: keyPath, singleLine: true) }
+                LabeledContent("Key file", value: keyPath)
                 HStack {
                     if case .valid = keys.state {
                         Button("Revoke", role: .destructive) { keys.deleteKey(reason: "revoked manually") }
@@ -58,12 +57,24 @@ struct CertificateTab: View {
                 Text("Click to copy. It is the Secretive public key marked as a certificate authority, deployed like any other key. It makes sshd accept any certificate that key signs for this account. Do not put the certificate itself on the host; it is only used by ssh on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("For your Mac: ~/.ssh/config") {
-                ManagedHostsField()
+            Section {
+                Text("Add this to ~/.ssh/config on this Mac, for the hosts that have the line above")
+                    .font(.headline)
+                CopyableText(text: sshConfigSnippet)
+                Text("Click to copy, then edit the Host patterns. IdentitiesOnly is what stops ssh from offering Secretive's key first; without it the agent key is tried before the certificate. IdentityAgent is not needed for these hosts. AutoEnclave never edits this file.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .onAppear { keys.refresh() }
+    }
+
+    private var sshConfigSnippet: String {
+        """
+        Host vin-008 *.example.com
+            IdentityFile \(keyPath)
+            IdentitiesOnly yes
+        """
     }
 
     private var authorizedKeysLine: String {
@@ -131,21 +142,18 @@ struct GitHubToggle: View {
     @State private var granting = false
     @State private var code: String?
     @State private var message: String?
-    @State private var block: String? = SSHConfig.currentBlock()
+    @AppStorage(Prefs.keyPath) private var keyPath = "~/.ssh/ephemeral_enclave"
 
     var body: some View {
         Group {
         Toggle("Use the ephemeral key for GitHub", isOn: $enabled)
             .onChange(of: enabled) { _, on in
-                if on { ensureScope() } else { _ = SSHConfig.sync(); message = nil; code = nil }
+                if on { ensureScope() } else { message = nil; code = nil }
             }
-        Text("GitHub doesn't accept certificates on personal accounts, so AutoEnclave adds the throwaway public key to your account on each mint and removes it on revoke, via gh. Turning this on adds github.com to the managed block in ~/.ssh/config, after checking nothing of yours would be overridden.")
+        Text("GitHub doesn't accept certificates on personal accounts, so AutoEnclave adds the throwaway public key to your account on each mint and removes it on revoke, via gh. Add this to ~/.ssh/config yourself so github.com uses the key:")
             .font(.caption).foregroundStyle(.secondary)
         if enabled {
-            SSHConfigApplyView(current: $block)
-            if let block {
-                Text(block).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-            }
+            CopyableText(text: "Host github.com\n    IdentityFile \(keyPath)\n    IdentitiesOnly yes")
             HStack {
                 switch scopeOK {
                 case .some(true):
@@ -440,101 +448,5 @@ struct CAKeyPicker: View {
             if caLine.isEmpty, k.count == 1 { caLine = k[0].line }   // only one key: it's the CA
         case .failure(let e): keys = []; error = e.description
         }
-    }
-}
-
-// MARK: - Managed ssh config hosts
-
-/// Shared view for the ssh config block: hosts field, conflict warnings, apply. Used in the Certificate tab,
-/// and its conflict/apply part again under the GitHub toggle.
-struct ManagedHostsField: View {
-    @AppStorage(Prefs.managedHosts) private var hosts = ""
-    @AppStorage(Prefs.githubRegister) private var github = false
-    @State private var current: String? = SSHConfig.currentBlock()
-    @AppStorage(Prefs.keyPath) private var keyPath = "~/.ssh/ephemeral_enclave"
-
-    /// The block as it would be written, using a placeholder host until some are configured.
-    private var preview: String {
-        let hosts = SSHConfig.desiredHosts
-        return SSHConfigBlock.render(hosts: hosts.isEmpty ? ["vin-008 *.example.com"] : hosts, keyPath: keyPath)
-            .trimmingCharacters(in: .newlines)
-    }
-
-    var body: some View {
-        TextField("Host patterns using the ephemeral key", text: $hosts, prompt: Text("*.devcore4.com, bastion-*"))
-            .onSubmit { }
-        Text("Comma separated. AutoEnclave keeps a marked block at the top of ~/.ssh/config so these hosts use IdentityFile + IdentitiesOnly; everything else in your config stays as it is.")
-            .font(.caption).foregroundStyle(.secondary)
-        SSHConfigApplyView(current: $current)
-        if let current {
-            Text("Currently in ~/.ssh/config:").font(.caption).foregroundStyle(.secondary)
-            CopyableText(text: current)
-        } else {
-            Text("Not in ~/.ssh/config yet. This is what Apply writes at the top of the file; click to copy it if you would rather add it by hand. IdentitiesOnly is what stops ssh from offering Secretive's key first. IdentityAgent is not needed for these hosts.")
-                .font(.caption).foregroundStyle(.secondary)
-            CopyableText(text: preview)
-        }
-        HStack {
-            Button("Remove block") { hosts = ""; _ = SSHConfig.sync(); current = SSHConfig.currentBlock() }
-                .disabled(current == nil)
-        }
-        .onChange(of: github) { _, _ in current = SSHConfig.currentBlock() }
-    }
-}
-
-/// Shows what the block would override and applies it, with an explicit "Apply anyway" when something conflicts.
-struct SSHConfigApplyView: View {
-    @Binding var current: String?
-    @AppStorage(Prefs.managedHosts) private var hosts = ""
-    @AppStorage(Prefs.githubRegister) private var github = false
-    @AppStorage(Prefs.sshConfigOverrideAccepted) private var accepted = false
-    @State private var conflicts: [SSHConfigConflict] = []
-    @State private var error: String?
-    @State private var status: String?
-
-    var body: some View {
-        Group {
-            if !conflicts.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Your ssh config already configures keys for these hosts:", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    ForEach(conflicts) { c in
-                        Text("• " + c.description).font(.caption).textSelection(.enabled)
-                    }
-                    Text("The managed block sits at the top of the file and ssh uses the first value it sees, so for these hosts the ephemeral key would be used instead of what is set there. Nothing has been changed.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            HStack {
-                Button(conflicts.isEmpty ? "Apply to ~/.ssh/config" : "Apply anyway") { apply(force: !conflicts.isEmpty) }
-                Button("Check") { check() }
-                if let status { Text(status).font(.caption).foregroundStyle(.secondary) }
-            }
-            if let error { Text(error).font(.caption).foregroundStyle(.red) }
-        }
-        .onAppear { check() }
-        .onChange(of: hosts) { _, _ in check() }
-        .onChange(of: github) { _, _ in check() }
-    }
-
-    private func check() {
-        error = nil
-        conflicts = SSHConfig.desiredHosts.isEmpty ? [] : SSHConfig.currentConflicts()
-        status = conflicts.isEmpty ? (SSHConfig.desiredHosts.isEmpty ? "No hosts configured." : "No conflicts found.") : nil
-    }
-
-    private func apply(force: Bool) {
-        switch SSHConfig.sync(force: force) {
-        case .applied:
-            if force { accepted = true }
-            conflicts = []; error = nil; status = "Applied."
-        case .unchanged:
-            conflicts = []; error = nil; status = "Already up to date."
-        case .conflicts(let c):
-            conflicts = c; status = nil
-        case .failed(let msg):
-            error = msg; status = nil
-        }
-        current = SSHConfig.currentBlock()
     }
 }

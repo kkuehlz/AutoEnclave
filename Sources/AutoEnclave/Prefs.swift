@@ -26,10 +26,6 @@ enum Prefs {
     // GitHub: register the throwaway public key on mint, remove it on revoke (via gh)
     static let githubRegister = "githubRegister"
 
-    // Host patterns (comma separated) that ~/.ssh/config should point at the throwaway key
-    static let managedHosts   = "managedHosts"
-    static let sshConfigOverrideAccepted = "sshConfigOverrideAccepted"   // user chose "Apply anyway" for conflicts
-
     static let defaultAgentSocket =
         NSHomeDirectory() + "/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
 
@@ -51,8 +47,6 @@ enum Prefs {
             deleteOnIdle: false,
             idleMinutes: 30,
             githubRegister: false,
-            managedHosts: "",
-            sshConfigOverrideAccepted: false,
         ])
     }
 
