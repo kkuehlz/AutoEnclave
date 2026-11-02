@@ -64,7 +64,14 @@ struct CertificateTab: View {
                 Text("Add this to ~/.ssh/config on this Mac, for the hosts that have the line above")
                     .font(.headline)
                 CopyableText(text: sshConfigSnippet)
-                Text("Click to copy, then edit the Host patterns. IdentitiesOnly is what stops ssh from offering \(agent.name)'s keys first; without it the agent keys are tried before the certificate. IdentityAgent is not needed for these hosts. For hosts behind a bastion use ProxyJump rather than ForwardAgent: forwarding carries the agent (\(agent.name)), not this key. AutoEnclave never edits this file.")
+                Text("Click to copy, then edit the Host patterns. IdentitiesOnly is what stops ssh from offering \(agent.name)'s keys first; without it the agent keys are tried before the certificate. For hosts behind a bastion use ProxyJump: each leg authenticates from this Mac with the certificate. AutoEnclave never edits this file.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Text("Agent socket, for hosts you hop onward from")
+                    .font(.headline)
+                CopyableText(text: keys.ephemeralAgentSocket, singleLine: true)
+                Text("Click to copy. While a certificate is valid, AutoEnclave runs a small ssh-agent on this socket holding only the ephemeral key and certificate; it is killed on revoke. Add IdentityAgent <this path> and ForwardAgent yes to a Host block if ssh or git need to work from that host onward with the certificate and no prompt. Each host you hop to needs the authorized_keys line above. Forwarding is your call: a forwarded agent lets that host use the certificate until revoke. \(agent.name) itself is never forwarded.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -79,6 +86,9 @@ struct CertificateTab: View {
             IdentitiesOnly yes
             # Multiple hops: each leg authenticates from this Mac with the certificate.
             # ProxyJump bastion.example.com
+            # To hop onward from the host itself, forward the ephemeral agent (socket below):
+            # IdentityAgent \(keyPath).sock
+            # ForwardAgent yes
         """
     }
 

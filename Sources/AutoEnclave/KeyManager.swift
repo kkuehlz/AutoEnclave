@@ -43,6 +43,8 @@ final class KeyManager: ObservableObject {
     var privateKeyPath: String { Prefs.expandedKeyPath }
     var publicKeyPath: String { privateKeyPath + ".pub" }
     var certPath: String { privateKeyPath + "-cert.pub" }
+    /// Socket of the dedicated ssh-agent that holds the ephemeral key when agent forwarding is on.
+    var ephemeralAgentSocket: String { privateKeyPath + ".sock" }
 
     private var allPaths: [String] { [privateKeyPath, publicKeyPath, certPath] }
 
@@ -70,6 +72,7 @@ final class KeyManager: ObservableObject {
     private func setState(_ new: KeyState) {
         state = new
         scheduleExpiryTimer()
+        syncEphemeralAgent()
     }
 
     /// Parses the "Valid: from X to Y" line of `ssh-keygen -L`. Returns nil for "forever" or unparseable.
@@ -231,6 +234,7 @@ final class KeyManager: ObservableObject {
             }
         }
         if removed > 0 { note("Deleted key (\(reason))") }
+        stopEphemeralAgent()
         refresh()
         // Always clear GitHub as well, whether or not local files were present. Network call, best effort:
         // sleep may cut it short, in which case the next mint or launch sweeps what is left.
@@ -264,6 +268,62 @@ final class KeyManager: ObservableObject {
             if case .success(let n) = GitHub.unregisterAll(), n > 0 {
                 await MainActor.run { self.note("Removed \(n) stale ephemeral key(s) from GitHub") }
             }
+        }
+    }
+
+    // MARK: Forwardable agent
+
+    /// ssh's ForwardAgent carries an agent, not a key file, so the ephemeral key and its certificate are also held
+    /// in a dedicated ssh-agent on `ephemeralAgentSocket`, with a lifetime matching the certificate. Nothing else is
+    /// ever in it. Whether to forward it is left to the user's ssh config (IdentityAgent + ForwardAgent).
+    private var ephemeralAgent: Process?
+
+    /// Brings the dedicated agent in line with the key state: running with the key loaded while a certificate is
+    /// valid, gone otherwise.
+    func syncEphemeralAgent() {
+        guard case .valid(let until) = state else {
+            stopEphemeralAgent()
+            return
+        }
+        let sock = ephemeralAgentSocket
+        let key = privateKeyPath
+        let lifetime = max(1, Int(until.timeIntervalSinceNow))
+        // Status 2 = no agent on the socket; 1 = agent with no identities; 0 = identities present.
+        let probe = Shell.run("/usr/bin/ssh-add", ["-l"], env: ["SSH_AUTH_SOCK": sock])
+        if probe.status == 2 {
+            // Clear any socket left by an earlier app run before binding a new agent to the path.
+            _ = Shell.run("/usr/bin/pkill", ["-f", "ssh-agent -D -a \(sock)"])
+            try? FileManager.default.removeItem(atPath: sock)
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-agent")
+            p.arguments = ["-D", "-a", sock]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            do { try p.run() } catch {
+                note("Could not start the forwarding agent: \(error.localizedDescription)"); return
+            }
+            ephemeralAgent = p
+            let deadline = Date().addingTimeInterval(3)
+            while !FileManager.default.fileExists(atPath: sock) && Date() < deadline { usleep(20_000) }
+        }
+        if probe.status != 0 {
+            // ssh-add picks up <key>-cert.pub on its own, so the agent offers the certificate, not just the key.
+            let add = Shell.run("/usr/bin/ssh-add", ["-q", "-t", String(lifetime), key], env: ["SSH_AUTH_SOCK": sock])
+            if add.ok { note("Loaded key into the forwarding agent at \(sock)") }
+            else { note("Could not load key into the forwarding agent: \(add.message)") }
+        }
+    }
+
+    /// Kills the dedicated agent (ours or one left by an earlier run) and removes its socket. Idempotent.
+    func stopEphemeralAgent() {
+        let sock = ephemeralAgentSocket
+        let hadSocket = FileManager.default.fileExists(atPath: sock)
+        if let p = ephemeralAgent, p.isRunning { p.terminate() }
+        ephemeralAgent = nil
+        if hadSocket {
+            _ = Shell.run("/usr/bin/pkill", ["-f", "ssh-agent -D -a \(sock)"])
+            try? FileManager.default.removeItem(atPath: sock)
+            note("Stopped the forwarding agent")
         }
     }
 

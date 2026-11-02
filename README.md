@@ -105,8 +105,37 @@ IdentityAgent is not needed for these hosts (a global `IdentityAgent` line for
 1Password is fine; `IdentitiesOnly` still wins).
 
 For hosts behind a bastion, add `ProxyJump bastion.example.com`. Each leg then
-authenticates from the Mac with the certificate. `ForwardAgent` would not
-help: it forwards the agent, not the ephemeral key.
+authenticates from the Mac with the certificate and no forwarding is needed.
+
+## Agent forwarding
+
+To hop onward *from* a host (`ssh` or `git` run there), ssh needs
+`ForwardAgent`, and `ForwardAgent` forwards an agent, not a key file. Plain
+forwarding would carry Secretive or 1Password, with their prompts. So while a
+certificate is valid AutoEnclave also runs
+
+```sh
+ssh-agent -D -a ~/.ssh/ephemeral_enclave.sock
+SSH_AUTH_SOCK=~/.ssh/ephemeral_enclave.sock ssh-add -t <seconds until expiry> ~/.ssh/ephemeral_enclave
+```
+
+and kills it on revoke, so that agent only ever holds the ephemeral key and
+its certificate. The Certificate tab shows the socket path to copy. Whether to
+forward it is up to your ssh config, per host:
+
+```
+Host vin-008 *.example.com
+    IdentityFile ~/.ssh/ephemeral_enclave
+    IdentitiesOnly yes
+    IdentityAgent ~/.ssh/ephemeral_enclave.sock
+    ForwardAgent yes
+```
+
+On the remote host `SSH_AUTH_SOCK` is the forwarded agent, so `ssh next-host`
+and `git` use the certificate without a prompt. Every host you hop to needs the
+`cert-authority` line in its authorized_keys. Nothing changes on the hosts
+otherwise. A forwarded agent lets a compromised host sign with the certificate
+until revoke, so forward only to hosts you hop from.
 
 ## 1Password
 
