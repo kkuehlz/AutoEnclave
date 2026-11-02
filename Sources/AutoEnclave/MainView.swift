@@ -114,7 +114,7 @@ struct GeneralTab: View {
     @AppStorage(Prefs.caPublicKeyPath) private var caPath = "~/.ssh/secretive-ca.pub"
     @AppStorage(Prefs.certIdentity) private var identity = NSUserName()
     @AppStorage(Prefs.principals) private var principals = NSUserName()
-    @AppStorage(Prefs.validityHours) private var hours = 10
+    @AppStorage(Prefs.validityHours) private var hours = 2
     @AppStorage(Prefs.agentKind) private var agentKind = Agent.secretive.rawValue
     @AppStorage(Prefs.agentSocket) private var socket = Prefs.defaultAgentSocket
     @EnvironmentObject private var keys: KeyManager

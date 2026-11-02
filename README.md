@@ -56,7 +56,7 @@ SSH_AUTH_SOCK=<agent socket> ssh-keygen -Us <CA public key path> -I <key ID> -n 
 ```
 
 Every placeholder is a field in the General tab. Defaults: `~/.ssh/ephemeral_enclave`,
-`~/.ssh/secretive-ca.pub`, your login name for both key ID and principals, 10 hours.
+`~/.ssh/secretive-ca.pub`, your login name for both key ID and principals, 2 hours.
 The CA public key file is written by AutoEnclave from whichever agent key you
 chose in the dropdown, so the key can have any name in Secretive or 1Password;
 nothing is tied to how the key is labelled there.

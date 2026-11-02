@@ -40,7 +40,7 @@ enum Prefs {
             caPublicKeyPath: "~/.ssh/secretive-ca.pub",
             certIdentity: NSUserName(),
             principals: NSUserName(),
-            validityHours: 10,
+            validityHours: 2,
             agentKind: defaultAgentKind().rawValue,
             agentSocket: defaultAgentSocket,
             deleteOnSleep: true,
